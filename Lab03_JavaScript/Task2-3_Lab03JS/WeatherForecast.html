@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Weather Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+        }
+        
+        .search-box {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+        }
+        
+        .search-box input {
+            width: 70%;
+            padding: 12px;
+            border: 2px solid #ddd;
+            border-radius: 4px;
+            font-size: 16px;
+        }
+        
+        .search-box button {
+            width: 28%;
+            padding: 12px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            margin-left: 2%;
+        }
+        
+        .weather-card {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            margin-bottom: 20px;
+        }
+        
+        .current-weather {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .temp-display {
+            font-size: 60px;
+            font-weight: bold;
+        }
+        
+        .forecast-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin-top: 20px;
+        }
+        
+        .forecast-item {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 40px;
+            font-size: 18px;
+            color: white;
+        }
+        
+        .error {
+            background: #dc3545;
+            color: white;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        
+        .recent-searches {
+            display: flex;
+            gap: 10px;
+            margin-top: 10px;
+            flex-wrap: wrap;
+        }
+        
+        .recent-city {
+            padding: 5px 15px;
+            background: #e9ecef;
+            border-radius: 20px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        
+        .recent-city:hover {
+            background: #dee2e6;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 style="color: white; text-align: center; margin-bottom: 30px;">
+            Weather Dashboard
+        </h1>
+        
+        <div class="search-box">
+            <input type="text" id="cityInput" placeholder="Enter city name..." 
+                    onkeypress="if(event.key==='Enter') searchWeather()">
+            <button onclick="searchWeather()">Search</button>
+            <div class="recent-searches" id="recentSearches"></div>
+        </div>
+        
+        <div id="loadingMessage" class="loading" style="display: none;">Loading weather data...</div>
+        <div id="errorMessage"></div>
+        <div id="weatherDisplay"></div>
+        <div id="forecastDisplay"></div>
+    </div>
+
+    <script>
+        // Your NEW API Key
+        const API_KEY = "4c1f2efd086101340c780dfd87e42314"; 
+        const API_URL = 'https://api.openweathermap.org/data/2.5/';
+        const MAX_RECENT_SEARCHES = 5;
+
+        const cityInput = document.getElementById('cityInput');
+        const weatherDisplay = document.getElementById('weatherDisplay');
+        const forecastDisplay = document.getElementById('forecastDisplay');
+        const errorMessageDiv = document.getElementById('errorMessage');
+        const loadingMessageDiv = document.getElementById('loadingMessage');
+        const recentSearchesDiv = document.getElementById('recentSearches');
+        
+        // --- UTILITY FUNCTIONS ---
+        function kelvinToCelsius(k) {
+            return (k - 273.15).toFixed(1);
+        }
+        
+        function getWeatherIcon(main) {
+            switch (main) {
+                case 'Clear': return '☀️'; 
+                case 'Clouds': return '☁️'; 
+                case 'Rain': 
+                case 'Drizzle':
+                case 'Thunderstorm': return '🌧️'; 
+                case 'Snow': return '❄️'; 
+                default: return '❓';
+            }
+        }
+
+        function displayLoading(isLoading) {
+            loadingMessageDiv.style.display = isLoading ? 'block' : 'none';
+            if (isLoading) {
+                weatherDisplay.innerHTML = '';
+                forecastDisplay.innerHTML = '';
+                clearError();
+            }
+        }
+
+        function showError(message) {
+            errorMessageDiv.innerHTML = `<div class="error">❌ ${message}</div>`;
+        }
+        
+        function clearError() {
+            errorMessageDiv.innerHTML = '';
+        }
+
+        // --- FETCH DATA (Using async/await and try...catch) ---
+        async function fetchWeather(city) {
+            const url = `${API_URL}weather?q=${city}&appid=${API_KEY}`;
+            const response = await fetch(url);
+            
+            if (response.status === 404) {
+                throw new Error(`City not found: ${city}. Please try again.`); 
+            }
+            if (!response.ok) {
+                // Catches 401 Unauthorized errors if the key is invalid
+                throw new Error('Failed to fetch current weather data. Please check your API Key.');
+            }
+            return response.json();
+        }
+        
+        async function fetchForecast(city) {
+            const url = `${API_URL}forecast?q=${city}&appid=${API_KEY}`;
+            const response = await fetch(url);
+            
+            if (!response.ok) {
+                throw new Error('Failed to fetch forecast data. Please check your API Key.');
+            }
+            return response.json();
+        }
+
+        // --- DISPLAY FUNCTIONS ---
+        function displayWeather(data) {
+            const tempC = kelvinToCelsius(data.main.temp);
+            const description = data.weather[0].description;
+            const mainWeather = data.weather[0].main;
+            const icon = getWeatherIcon(mainWeather);
+
+            weatherDisplay.innerHTML = `
+                <div class="weather-card">
+                    <h2>Current Weather in ${data.name}</h2>
+                    <div class="current-weather">
+                        <span class="temp-display">${tempC}°C</span>
+                        <div>
+                            <p><strong>${icon} ${description.charAt(0).toUpperCase() + description.slice(1)}</strong></p>
+                            <p>Humidity: ${data.main.humidity}%</p>
+                            <p>Wind Speed: ${data.wind.speed} m/s</p>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+        
+        // Optimized forecast filtering logic: Picks the closest reading to Noon for the next 5 days
+        function displayForecast(data) {
+            const dailyForecasts = [];
+            const dailyMap = new Map();
+            const today = new Date().toLocaleDateString('en-US'); 
+            
+            // Step 1: Iterate through 3-hour entries and select the best one (closest to 12 PM) for each day
+            for (const item of data.list) {
+                const date = new Date(item.dt * 1000);
+                const dateString = date.toLocaleDateString('en-US');
+                const hour = date.getHours();
+                
+                // Skip today's forecast
+                if (dateString === today) continue; 
+
+                const currentBest = dailyMap.get(dateString);
+                
+                // Keep the current item if it's the first for the day OR if it's closer to 12 PM
+                if (!currentBest || Math.abs(hour - 12) < Math.abs(new Date(currentBest.dt * 1000).getHours() - 12)) {
+                     dailyMap.set(dateString, item);
+                }
+            }
+            
+            // Step 2: Convert Map to Array and limit to the next 5 days
+            for (const item of dailyMap.values()) {
+                if (dailyForecasts.length < 5) {
+                    dailyForecasts.push(item);
+                }
+            }
+
+            if (dailyForecasts.length === 0) return;
+
+            // Step 3: Render HTML
+            const forecastHTML = dailyForecasts.map(item => {
+                const date = new Date(item.dt * 1000);
+                const dayName = date.toLocaleDateString('en-US', { weekday: 'short' });
+                const tempC = kelvinToCelsius(item.main.temp);
+                const mainWeather = item.weather[0].main;
+                const icon = getWeatherIcon(mainWeather);
+                const forecastHour = date.getHours().toString().padStart(2, '0');
+
+                return `
+                    <div class="forecast-item">
+                        <p><strong>${dayName}</strong></p>
+                        <p style="font-size: 24px; margin: 5px 0;">${icon}</p>
+                        <p>${tempC}°C</p>
+                        <p style="font-size: 12px; color: #6c757d;">${forecastHour}:00</p>
+                    </div>
+                `;
+            }).join('');
+
+            forecastDisplay.innerHTML = `
+                <div class="weather-card">
+                    <h2>5-Day Forecast (Closest to Noon)</h2>
+                    <div class="forecast-grid">
+                        ${forecastHTML}
+                    </div>
+                </div>
+            `;
+        }
+
+        // --- LOCAL STORAGE AND SEARCH ---
+        function saveRecentSearch(city) {
+            const storedSearches = localStorage.getItem('recentCities');
+            let recentCities = storedSearches ? JSON.parse(storedSearches) : [];
+            
+            // Remove the city if it already exists to move it to the front
+            recentCities = recentCities.filter(c => c.toLowerCase() !== city.toLowerCase());
+            
+            // Add the new city to the front
+            recentCities.unshift(city);
+            
+            // Limit to MAX_RECENT_SEARCHES
+            if (recentCities.length > MAX_RECENT_SEARCHES) {
+                recentCities = recentCities.slice(0, MAX_RECENT_SEARCHES);
+            }
+            
+            localStorage.setItem('recentCities', JSON.stringify(recentCities));
+            loadRecentSearches();
+        }
+        
+        function loadRecentSearches() {
+            const storedSearches = localStorage.getItem('recentCities');
+            const recentCities = storedSearches ? JSON.parse(storedSearches) : [];
+            
+            recentSearchesDiv.innerHTML = recentCities.map(city => `
+                <span class="recent-city" onclick="searchWeather('${city}')">${city}</span>
+            `).join('');
+        }
+
+        async function searchWeather(cityOverride) {
+            const city = cityOverride || cityInput.value.trim();
+            if (!city) {
+                showError('Please enter a city name.');
+                return;
+            }
+
+            displayLoading(true);
+
+            try {
+                // Use Promise.all to fetch both APIs concurrently
+                const [weatherData, forecastData] = await Promise.all([
+                    fetchWeather(city),
+                    fetchForecast(city)
+                ]);
+
+                displayWeather(weatherData);
+                displayForecast(forecastData);
+                saveRecentSearch(city); 
+
+            } catch (error) {
+                console.error(error);
+                showError(error.message || 'An unexpected error occurred.'); 
+            } finally {
+                displayLoading(false);
+            }
+        }
+        
+        // --- Initialize ---
+        loadRecentSearches();
+    </script>
+</body>
+</html>
